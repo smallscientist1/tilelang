@@ -2,21 +2,21 @@
 # Licensed under the MIT License.
 """The profiler and convert to torch utils"""
 
-from typing import List, Literal
+from typing import List, Literal, Optional, Callable
 from functools import partial
 import torch
 from contextlib import suppress
 
 import tvm
-from torch.utils.dlpack import to_dlpack
-from tvm.runtime import ndarray
 from tvm.relay import TensorType
 
+from tilelang.engine import lower
 from tilelang.jit.adapter import TorchDLPackKernelAdapter
 from tilelang.utils.tensor import (
     get_tensor_supply,
     TensorSupplyType,
     torch_assert_close,
+    adapt_torch2tvm,
 )
 
 
@@ -41,7 +41,7 @@ class Profiler(TorchDLPackKernelAdapter):
 
     def assert_allclose(
         self,
-        reference_program: callable,
+        reference_program: Callable,
         atol: float = 1e-2,
         rtol: float = 1e-2,
         max_mismatched_ratio=0.01,
@@ -87,31 +87,33 @@ class Profiler(TorchDLPackKernelAdapter):
                     rhs,
                 ]
 
-    def run_once(self, func=None):
-        import ctypes
-
-        libcuda = ctypes.CDLL("libcuda.so")  # noqa: F841
-
+    def run_once(self, func: Optional[Callable] = None):
         ins = self._get_inputs()
         if not func:
             func = self.__call__
         return func(*ins)
 
+    def determine_profiler(self,
+                           func: Optional[Callable] = None,
+                           profiler: Literal["torch", "tvm", "auto"] = "auto"):
+        if profiler == "auto":
+            if func is None or isinstance(func, tvm.runtime.Module):
+                return "tvm"
+            else:
+                return "torch"
+        return profiler
+
     def do_bench(
         self,
-        func: callable = None,
-        warmup=25,
-        rep=100,
-        n_warmup=1,
-        n_repeat=1,
+        func: Optional[Callable] = None,
+        warmup: int = 25,
+        rep: int = 100,
+        n_warmup: int = 1,
+        n_repeat: int = 1,
         profiler: Literal["torch", "tvm", "auto"] = "auto",
         input_tensors: List[torch.Tensor] = None,
     ):
-        if func is None:
-            # set default value if not provided
-            func = self.mod
-            profiler = "tvm"
-
+        profiler = self.determine_profiler(func, profiler)
         if profiler == "torch":
             ins = self._get_inputs() if input_tensors is None else input_tensors
             bench_func = partial(func, *ins)
@@ -123,6 +125,9 @@ class Profiler(TorchDLPackKernelAdapter):
                 _n_repeat=n_repeat,
             )
         elif profiler == "tvm":
+            if func is None:
+                func = self.mod
+            assert isinstance(func, tvm.runtime.Module), "func should be a TVM module"
             ins = (self._get_inputs(with_output=True) if input_tensors is None else input_tensors)
             target = "cuda"
 
@@ -134,28 +139,9 @@ class Profiler(TorchDLPackKernelAdapter):
             device = tvm.cuda(0) if target == "cuda" else tvm.rocm(0)
             time_evaluator = self.mod.time_evaluator(
                 self.mod.entry_name, device, number=rep, repeat=n_repeat)
-            tvm_inputs = [ndarray.from_dlpack(to_dlpack(inp)) for inp in ins]
+            tvm_inputs = [adapt_torch2tvm(inp) for inp in ins]
             # Transform Latency to ms
             return time_evaluator(*tvm_inputs).mean * 1e3
-        elif profiler == "auto":
-            # TODO(lei): select appropriate profiler based on the function
-            # class
-            ins = self._get_inputs()
-            bench_func = partial(func, *ins)
-            torch_res = do_bench(
-                bench_func,
-                warmup=warmup,
-                rep=rep,
-                _n_warmup=n_warmup,
-                _n_repeat=n_repeat,
-            )
-
-            ins = self._get_inputs(with_output=True)
-            time_evaluator = self.mod.time_evaluator(
-                self.mod.entry_name, tvm.cuda(0), number=rep, repeat=n_repeat)
-            tvm_inputs = [ndarray.from_dlpack(to_dlpack(inp)) for inp in ins]
-            tvm_res = time_evaluator(*tvm_inputs).mean * 1e3
-            return min(torch_res, tvm_res)
         else:
             raise ValueError(f"Unknown profiler: {profiler}")
 
@@ -249,3 +235,17 @@ def do_bench(
             ret = ret[0]
         return ret
     return getattr(torch, return_mode)(times).item()
+
+
+_cached = {}
+
+
+def cached(func, result_idx: List[int], *args):
+    global _cached
+    key = (func, tuple(result_idx), *args)
+    if key not in _cached:
+        program = func(*args)
+        mod, params = lower(program)
+        mod = TorchDLPackKernelAdapter(mod, params, result_idx)
+        _cached[key] = mod
+    return _cached[key]
