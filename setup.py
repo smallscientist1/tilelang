@@ -151,7 +151,7 @@ def download_and_extract_llvm(version, is_aarch64=False, extract_path="3rdparty"
 
 
 package_data = {
-    "tilelang": ["py.typed"],
+    "tilelang": ["py.typed", "*pyx"],
 }
 
 LLVM_VERSION = "10.0.1"
@@ -228,6 +228,27 @@ class TileLangBuilPydCommand(build_py):
         print(f"Extension output directory (parent): {ext_output_dir}")
         print(f"Build temp directory: {build_temp_dir}")
 
+        # copy cython files
+        CYTHON_SRC = [
+            "tilelang/jit/adapter/cython/cython_wrapper.pyx",
+        ]
+        for item in CYTHON_SRC:
+            source_dir = os.path.join(ROOT_DIR, item)
+            target_dir = os.path.join(self.build_lib, item)
+            if os.path.isdir(source_dir):
+                self.mkpath(target_dir)
+                distutils.dir_util.copy_tree(source_dir, target_dir)
+            else:
+                target_dir = os.path.dirname(target_dir)
+                if not os.path.exists(target_dir):
+                    os.makedirs(target_dir)
+                if not os.path.exists(os.path.join(target_dir, os.path.basename(source_dir))):
+                    # if not exists, copy the file
+                    # as tox will copy the file to the build
+                    # directory based on manifest file
+                    shutil.copy2(source_dir, target_dir)
+
+        # copy the tl_templates
         TILELANG_SRC = [
             "src/tl_templates",
         ]
@@ -243,18 +264,18 @@ class TileLangBuilPydCommand(build_py):
                     os.makedirs(target_dir)
                 shutil.copy2(source_dir, target_dir)
 
-        potential_dirs = [
-            ext_output_dir,
-            self.build_lib,
-            build_temp_dir,
-            os.path.join(ROOT_DIR, "build"),
-        ]
-
         TVM_PREBUILD_ITEMS = [
             "libtvm_runtime.so",
             "libtvm.so",
             "libtilelang.so",
             "libtilelang_module.so",
+        ]
+
+        potential_dirs = [
+            ext_output_dir,
+            self.build_lib,
+            build_temp_dir,
+            os.path.join(ROOT_DIR, "build"),
         ]
 
         for item in TVM_PREBUILD_ITEMS:

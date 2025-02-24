@@ -78,9 +78,9 @@ pip install .  # with -e option if you want to install in editable mode
 
 ### Method 2: Build from Source
 We currently provide three ways to install **tile-lang** from source:
- - [Install from Source (using your own TVM installation)](./docs/get_started/Installation.rst#method-1-install-from-source-using-your-own-tvm-installation)
- - [Install from Source (using the bundled TVM submodule)](./docs/get_started/Installation.rst#method-2-install-from-source-with-our-tvm-submodule)
- - [Install Using the Provided Script](./docs/get_started/Installation.rst##method-3-install-using-the-provided-script)
+ - [Install from Source (using your own TVM installation)](./docs/get_started/Installation.md#method-1-install-from-source-using-your-own-tvm-installation)
+ - [Install from Source (using the bundled TVM submodule)](./docs/get_started/Installation.md#method-2-install-from-source-using-the-bundled-tvm-submodule)
+ - [Install Using the Provided Script](./docs/get_started/Installation.md#method-3-install-using-the-provided-script)
 
 
 ## Quick Start
@@ -154,7 +154,7 @@ func = matmul(1024, 1024, 1024, 128, 128, 32)
 # out_idx specifies the index of the output buffer in the argument list
 # if out_idx is specified, the tensor will be created during runtime
 # target currently can be "cuda" or "hip" or "cpu".
-jit_kernel = tilelang.JITKernel(func, out_idx=[2], target="cuda")
+jit_kernel = tilelang.compile(func, out_idx=[2], target="cuda")
 
 # 3. Test the kernel in Python with PyTorch data
 import torch

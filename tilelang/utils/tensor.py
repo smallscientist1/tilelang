@@ -15,6 +15,7 @@ class TensorSupplyType(Enum):
     Randn = 4
     Zero = 5
     One = 6
+    Auto = 7
 
 
 def map_torch_type(intype):
@@ -28,15 +29,13 @@ def map_torch_type(intype):
         return getattr(torch, intype)
 
 
-float8_dtype_map = {
-    torch.float8_e4m3fn: "e4m3_float8",
-    torch.float8_e4m3fnuz: "e4m3_float8",
-    torch.float8_e5m2: "e5m2_float8",
-    torch.float8_e5m2fnuz: "e5m2_float8",
-}
-
-
 def adapt_torch2tvm(arg):
+    float8_dtype_map = {
+        torch.float8_e4m3fn: "e4m3_float8",
+        torch.float8_e4m3fnuz: "e4m3_float8",
+        torch.float8_e5m2: "e5m2_float8",
+        torch.float8_e5m2fnuz: "e5m2_float8",
+    }
     if isinstance(arg, torch.Tensor):
         if arg.dtype in {
                 torch.float8_e4m3fn, torch.float8_e4m3fnuz, torch.float8_e5m2, torch.float8_e5m2fnuz
@@ -54,6 +53,14 @@ def get_tensor_supply(supply_type: TensorSupplyType):
         device = torch.cuda.current_device()
 
         shape = list(map(int, tensor.shape))
+        if supply_type == TensorSupplyType.Auto:
+            if dtype == torch.float16 or dtype == torch.float32:
+                return torch.empty(*shape, device=device, dtype=dtype).normal_(-1.0, 1.0)
+            elif dtype == torch.uint8:
+                return torch.randint(0, 2, size=shape, device=device, dtype=dtype)
+            else:
+                raise NotImplementedError(dtype)
+
         if dtype == torch.int8 and supply_type in [
                 TensorSupplyType.Uniform,
                 TensorSupplyType.Normal,
