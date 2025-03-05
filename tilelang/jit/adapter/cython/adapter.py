@@ -9,8 +9,8 @@ from tilelang import tvm as tvm
 from tvm.target import Target
 from tvm.relay import TensorType
 from tvm import tir
-from .wrapper import TLWrapper
-from .libgen import LibraryGenerator
+from tilelang.jit.adapter.wrapper import TLWrapper
+from tilelang.jit.adapter.libgen import LibraryGenerator
 from tilelang.utils.target import determine_target
 from tilelang.utils.language import retrieve_func_from_module
 from tilelang.contrib.cc import get_cplus_compiler
@@ -22,7 +22,7 @@ import os
 from pathlib import Path
 import logging
 
-logger = logging.getLogger("tilelang")
+logger = logging.getLogger(__name__)
 
 
 def get_cython_compiler() -> Optional[str]:
@@ -175,7 +175,12 @@ class CythonKernelAdapter(BaseKernelAdapter):
         self.lib_generator.update_lib_code(self.wrapped_source)
         self.lib_generator.compile_lib()
         self.lib = self.lib_generator.load_lib()
-        self.lib.init()
+
+        try:
+            self.lib.init()
+        except Exception as e:
+            raise Exception(
+                f"Failed to initialize the compiled library for {self.target}: {e}") from e
 
         self.cython_wrapper = CythonKernelWrapper(self.dynamic_symbolic_map, self.result_idx,
                                                   self.params, self.lib)
@@ -193,10 +198,11 @@ class CythonKernelAdapter(BaseKernelAdapter):
         buffer_map = func.buffer_map
         dynamic_symbolic_map = {}
         for i, param in enumerate(params):
-            buffer = buffer_map[param]
-            for j, shape in enumerate(buffer.shape):
-                if isinstance(shape, tir.Var) and (shape not in dynamic_symbolic_map):
-                    dynamic_symbolic_map[shape] = (i, j)
+            if param in buffer_map:
+                buffer = buffer_map[param]
+                for j, shape in enumerate(buffer.shape):
+                    if isinstance(shape, tir.Var) and (shape not in dynamic_symbolic_map):
+                        dynamic_symbolic_map[shape] = (i, j)
         return dynamic_symbolic_map
 
     def _forward_from_prebuild_lib(self, *args, stream: Optional[int] = None):
