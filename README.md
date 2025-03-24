@@ -87,7 +87,7 @@ Or install locally:
 sudo apt-get update
 sudo apt-get install -y python3-setuptools gcc libtinfo-dev zlib1g-dev build-essential cmake libedit-dev libxml2-dev
 
-pip install .  # with -e option if you want to install in editable mode
+pip install -e . -v # remove -e option if you don't want to install in editable mode, -v for verbose output
 ```
 
 ### Method 2: Build from Source
@@ -96,6 +96,16 @@ We currently provide three ways to install **tile-lang** from source:
  - [Install from Source (using the bundled TVM submodule)](./docs/get_started/Installation.md#method-2-install-from-source-using-the-bundled-tvm-submodule)
  - [Install Using the Provided Script](./docs/get_started/Installation.md#method-3-install-using-the-provided-script)
 
+### Method 3: Install with Nightly Version
+
+For users who want access to the latest features and improvements before official releases, we provide nightly builds of **tile-lang**.
+
+```bash
+pip install tilelang -f https://tile-ai.github.io/whl/nightly/cu121/
+# or pip install tilelang --find-links https://tile-ai.github.io/whl/nightly/cu121/
+```
+
+> **Note:** Nightly builds contain the most recent code changes but may be less stable than official releases. They're ideal for testing new features or if you need a specific bugfix that hasn't been released yet.
 
 ## Quick Start
 
@@ -216,6 +226,18 @@ Check our [tilelang v0.2.0 release plan](https://github.com/tile-ai/tilelang/iss
 ---
 
 TileLang has now been used in project [BitBLAS](https://github.com/microsoft/BitBLAS) and [AttentionEngine](https://github.com/microsoft/AttentionEngine).
+
+## Citation
+If you find this repository helpful, please cite our work:
+```bib
+@software{tileai2025tilelang,
+  title  = {TileLang: A Composable Tiled Programming Model for AI Systems},
+  author = {Wang, Lei and Cheng, Yu and Shi, Yining and Tang, Zhengju and Mo, Zhiwen and Ma, Lingxiao and Xia, Yuqing and Xue, Jilong and Yang, Fan and Yang, Zhi},
+  url    = {https://github.com/tile-ai/tilelang},
+  month  = jan,
+  year   = {2025}
+}
+```
 
 ## Join the Discussion
 

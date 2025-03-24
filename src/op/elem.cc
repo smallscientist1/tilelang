@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft Corporation.
+// Copyright (c) Tile-AI Corporation.
 // Licensed under the MIT License.
 
 /*!
@@ -71,7 +71,9 @@ Array<PrimExpr> Copy::MakeIndices(const Array<IterVar> &ivs,
       idx++;
     }
   }
-  ICHECK(idx == ivs.size());
+  ICHECK(idx == ivs.size())
+      << "idx = " << idx << ", ivs.size() = " << ivs.size()
+      << "src name = " << src->name << ", dst name = " << dst->name;
   return indices;
 }
 
@@ -107,6 +109,12 @@ PrimExpr Copy::MakePredicate(arith::Analyzer *analyzer,
 
 For Copy::MakeSIMTLoop(arith::Analyzer *analyzer) const {
   Array<IterVar> loop_vars = MakeIterVars();
+  bool is_scalar = loop_vars.size() == 0;
+  if (is_scalar) {
+    return For(Var("i"), 0, 1, ForKind::kSerial,
+               BufferStore(dst, BufferLoad(src, {0}), {0}));
+  }
+
   for (const auto &iv : loop_vars)
     analyzer->Bind(iv->var, iv->dom);
 
@@ -125,7 +133,6 @@ For Copy::MakeSIMTLoop(arith::Analyzer *analyzer) const {
   Stmt body = BufferStore(dst, value, dst_indices);
   if (dst_predicate.defined())
     body = IfThenElse(dst_predicate, body);
-
   for (int i = loop_vars.size() - 1; i >= 0; i--) {
     Map<String, ObjectRef> annotations = {};
     if (coalesced_width.defined()) {
@@ -333,15 +340,66 @@ LayoutMap Copy::InferLayout(const LayoutInferArgs &T, InferLevel level) {
     arith::Analyzer analyzer;
     par_op_ = std::make_unique<ParallelOp>(MakeSIMTLoop(&analyzer));
   }
+  if (T.layout_map.count(src) && T.layout_map.count(dst)) {
+    // Only compare fragment layout
+    if (src.scope() == "local.fragment" && dst.scope() == "local.fragment") {
+      const FragmentNode *src_layout = T.layout_map[src].as<Fragment>().get();
+      const FragmentNode *dst_layout = T.layout_map[dst].as<Fragment>().get();
+      if (src_layout && dst_layout) {
+        ICHECK(src_layout->IsEqual(dst_layout, true))
+            << "Get different layout for " << src << " and " << dst
+            << "\nLHS = " << src_layout->DebugOutput()
+            << "\nRHS = " << dst_layout->DebugOutput()
+            << "\nYou may need to use a shared memory to transform the layout";
+      }
+    }
+  }
   return par_op_->InferLayout(T, level);
 }
 
 Fill::Fill(Array<PrimExpr> args, BufferMap vmap) {
-  dst = vmap[GetVarFromAccessPtr(args[0])];
+
+  if (args[0]->IsInstance<BufferLoadNode>()) {
+    auto buffer_load = Downcast<BufferLoad>(args[0]);
+    for (const auto &index : buffer_load->indices) {
+      if (const auto *ramp = index.as<RampNode>()) {
+        CHECK(ramp->stride.as<IntImmNode>()->value == 1)
+            << "Only stride 1 ramps are supported";
+        const auto *lanes = ramp->lanes.as<IntImmNode>();
+        CHECK(lanes)
+            << "Scalable vectors not supported in BufferRegion conversion";
+        region.push_back(Range::FromMinExtent(ramp->base, ramp->lanes));
+      } else {
+        region.push_back(Range::FromMinExtent(index, 1));
+      }
+    }
+    dst = buffer_load->buffer;
+  } else {
+    dst = vmap[GetVarFromAccessPtr(args[0])];
+    for (int i = 0; i < dst->shape.size(); i++) {
+      region.push_back(Range(0, dst->shape[i]));
+    }
+  }
+
   if (args[1]->dtype != dst->dtype) {
     value = Cast(dst->dtype, args[1]);
   } else {
     value = args[1];
+  }
+
+  ICHECK(region.size() == dst->shape.size())
+      << "region size = " << region.size() << " != " << dst->shape.size();
+  for (int i = 0; i < region.size(); i++) {
+    // bound check if region is static
+    if (region[i]->min.as<IntImm>()) {
+      int64_t min = Downcast<IntImm>(region[i]->min)->value;
+      ICHECK_GE(min, 0) << "region[" << i << "] = " << min << " < 0";
+    }
+    if (region[i]->extent.as<IntImm>()) {
+      int64_t extent = Downcast<IntImm>(region[i]->extent)->value;
+      ICHECK_LE(extent, Downcast<IntImm>(dst->shape[i])->value)
+          << "region[" << i << "] = " << extent << " > " << dst->shape[i];
+    }
   }
 }
 
@@ -351,7 +409,7 @@ For Fill::MakeSIMTLoop(arith::Analyzer *analyzer) const {
   Array<PrimExpr> dst_indices;
   for (int i = 0; i < ndim; i++) {
     Var var = Var(std::string{char('i' + i)});
-    loop_vars.push_back({Range(0, dst->shape[i]), var, IterVarType::kDataPar});
+    loop_vars.push_back({region[i], var, IterVarType::kDataPar});
     dst_indices.push_back(var);
   }
   Stmt body = BufferStore(dst, value, dst_indices);
@@ -381,6 +439,14 @@ Stmt Fill::Lower(const LowerArgs &T, arith::Analyzer *analyzer) const {
   } else if (dst.scope() == "local") {
     auto init_loop = MakeSIMTLoop(analyzer);
     auto vectorized_thread_loop = VectorizeLoop(init_loop);
+    return vectorized_thread_loop;
+  } else if (dst.scope() == "shared.dyn" || dst.scope() == "shared") {
+    auto par_op = std::make_unique<ParallelOp>(MakeSIMTLoop(analyzer));
+    par_op->InferLayout({T.target, T.block_size, T.layout_map},
+                        InferLevel::kFree);
+    auto thread_loop = PartitionLoop(par_op->GetRoot(), T.thread_var, analyzer,
+                                     par_op->GetLoopLayout());
+    auto vectorized_thread_loop = VectorizeLoop(thread_loop);
     return vectorized_thread_loop;
   } else {
     LOG(FATAL) << "Unsupported scope " << dst.scope();

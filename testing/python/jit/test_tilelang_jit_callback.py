@@ -1,9 +1,10 @@
-# Copyright (c) Microsoft Corporation.
+# Copyright (c) Tile-AI Corporation.
 # Licensed under the MIT License.
 
 from tilelang import tvm as tvm
 import tilelang.testing
 import tilelang
+from tilelang.engine.callback import register_cuda_postproc_callback
 import torch
 
 
@@ -88,12 +89,12 @@ def run_gemm(
 
     stramp = "&*(XS)"
 
-    @tvm.register_func("tilelang_callback_cuda_postproc", override=True)
+    @register_cuda_postproc_callback
     def tilelang_callback_cuda_postproc(code, _):
         code = f"// {stramp}\n" + code
         return code
 
-    matmul_kernel = tilelang.compile(program, out_idx=-1, execution_backend="dlpack")
+    matmul_kernel = tilelang.compile(program, out_idx=-1)
 
     kernel_source = matmul_kernel.get_kernel_source()
 
@@ -196,7 +197,7 @@ def run_gemm_jit_kernel(
         num_threads,
     )
 
-    matmul_kernel = tilelang.compile(program, out_idx=-1, execution_backend="dlpack")
+    matmul_kernel = tilelang.compile(program, out_idx=-1)
 
     A = torch.randn(M, K, dtype=torch.__getattribute__(in_dtype)).cuda()
     B = torch.randn(K, N, dtype=torch.__getattribute__(in_dtype)).cuda()

@@ -1,45 +1,60 @@
-// Copyright (c) Microsoft Corporation.
+// Copyright (c) Tile-AI Corporation.
 // Licensed under the MIT License.
 #pragma once
 
-#include <cute/algorithm/copy.hpp>
+#include <cute/algorithm/clear.hpp>
+#include <cute/arch/mma_sm80.hpp>
+#include <cute/atom/mma_atom.hpp>
+#include <cute/underscore.hpp>
 
 #include "common.h"
 
 namespace cute {
 
-template <typename A_type, typename B_type, typename C_type>
+template <typename A_type, typename B_type, typename C_type, int num_warp_m,
+          int num_warp_n>
 struct DispatchInstruction;
 
+using _X = Underscore;
+
 #if (defined(__CUDA_ARCH_LIST__) && (__CUDA_ARCH_LIST__ >= 800))
-template <> struct DispatchInstruction<half_t, half_t, half_t> {
+template <int num_warp_m, int num_warp_n>
+struct DispatchInstruction<half_t, half_t, half_t, num_warp_m, num_warp_n> {
   using MMA = MMA_Atom<SM80_16x8x16_F16F16F16F16_TN>;
-  using MMA_Group = Layout<Shape<_1, _2, _1>>;
+  using MMA_Group = Tile<_X, Int<num_warp_n * 16>, _X>;
 };
-template <> struct DispatchInstruction<half_t, half_t, float> {
+template <int num_warp_m, int num_warp_n>
+struct DispatchInstruction<half_t, half_t, float, num_warp_m, num_warp_n> {
   using MMA = MMA_Atom<SM80_16x8x16_F32F16F16F32_TN>;
-  using MMA_Group = Layout<Shape<_1, _2, _1>>;
+  using MMA_Group = Tile<_X, Int<num_warp_n * 16>, _X>;
 };
-template <> struct DispatchInstruction<bfloat16_t, bfloat16_t, float> {
+template <int num_warp_m, int num_warp_n>
+struct DispatchInstruction<bfloat16_t, bfloat16_t, float, num_warp_m,
+                           num_warp_n> {
   using MMA = MMA_Atom<SM80_16x8x16_F32BF16BF16F32_TN>;
-  using MMA_Group = Layout<Shape<_1, _2, _1>>;
+  using MMA_Group = Tile<_X, Int<num_warp_n * 16>, _X>;
 };
-template <> struct DispatchInstruction<tfloat32_t, tfloat32_t, float> {
+template <int num_warp_m, int num_warp_n>
+struct DispatchInstruction<tfloat32_t, tfloat32_t, float, num_warp_m,
+                           num_warp_n> {
   using MMA = MMA_Atom<SM80_16x8x8_F32TF32TF32F32_TN>;
-  using MMA_Group = Layout<Shape<_1, _2, _1>>;
+  using MMA_Group = Tile<_X, Int<num_warp_n * 16>, _X>;
 };
-template <> struct DispatchInstruction<int8_t, int8_t, int> {
+template <int num_warp_m, int num_warp_n>
+struct DispatchInstruction<int8_t, int8_t, int, num_warp_m, num_warp_n> {
   using MMA = MMA_Atom<SM80_16x8x32_S32S8S8S32_TN>;
-  using MMA_Group = Layout<Shape<_1, _2, _1>>;
+  using MMA_Group = Tile<_X, Int<num_warp_n * 16>, _X>;
 };
-template <> struct DispatchInstruction<double, double, double> {
+template <int num_warp_m, int num_warp_n>
+struct DispatchInstruction<double, double, double, num_warp_m, num_warp_n> {
   using MMA = MMA_Atom<SM80_8x8x4_F64F64F64F64_TN>;
-  using MMA_Group = Layout<Shape<_2, _2, _1>>;
+  using MMA_Group = Tile<Int<num_warp_m * 16>, Int<num_warp_n * 16>, _X>;
 };
 #elif (defined(__CUDA_ARCH_LIST__) && (__CUDA_ARCH_LIST__ >= 750))
-template <> struct DispatchInstruction<half_t, half_t, float> {
+template <int num_warp_m, int num_warp_n>
+struct DispatchInstruction<half_t, half_t, float, num_warp_m, num_warp_n> {
   using MMA = MMA_Atom<SM75_16x8x8_F32F16F16F32_TN>;
-  using MMA_Group = Layout<Shape<_1, _2, _2>>;
+  using MMA_Group = Tile<_X, Int<num_warp_n * 16>, _16>;
 };
 #endif
 
@@ -169,8 +184,8 @@ struct OperandTraits<64, N, K, false,
 };
 
 template <int M, int N, int K, int num_warp_m, int num_warp_n, bool trans_A,
-          bool trans_B, typename A_type_raw, typename B_type_raw,
-          typename C_type_raw>
+          bool trans_B, bool clear_accum, typename A_type_raw,
+          typename B_type_raw, typename C_type_raw>
 class GemmTensorOp {
 public:
   using A_type =
@@ -180,7 +195,8 @@ public:
       typename std::conditional<std::is_same<B_type_raw, float>::value,
                                 tfloat32_t, A_type_raw>::type;
   using C_type = C_type_raw;
-  using Instruction = DispatchInstruction<A_type, B_type, C_type>;
+  using Instruction =
+      DispatchInstruction<A_type, B_type, C_type, num_warp_m, num_warp_n>;
 
   using OperandATraits =
       OperandTraits<sizeof_bits<A_type>::value, M, K, !trans_A>;
@@ -235,6 +251,9 @@ public:
         make_tensor(make_rmem_ptr(reinterpret_cast<C_type *>(pC)),
                     partition_shape_C(tiled_mma, Shape<Int<M>, Int<N>>{}));
 
+    if constexpr (clear_accum) {
+      clear(acc);
+    }
     // when layout is KxN and n_warp is 1, there seem to be a bug, use this as a
     // workaround
     auto tCrA_view = make_tensor(tCrA.data(), remove_swizzle(tCrA.layout()));
@@ -269,6 +288,9 @@ public:
         make_tensor(make_rmem_ptr(reinterpret_cast<A_type *>(pA)),
                     partition_shape_A(tiled_mma, Shape<Int<M>, Int<K>>{}));
 
+    if constexpr (clear_accum) {
+      clear(acc);
+    }
     auto tCrB_view = make_tensor(tCrB.data(), remove_swizzle(tCrB.layout()));
     copy(tiled_copy_B, tCsB(_, _, 0), tCrB_copy_view(_, _, 0));
     CUTE_UNROLL
@@ -302,6 +324,9 @@ public:
         make_tensor(make_rmem_ptr(reinterpret_cast<B_type *>(pB)),
                     partition_shape_B(tiled_mma, Shape<Int<N>, Int<K>>{}));
 
+    if constexpr (clear_accum) {
+      clear(acc);
+    }
     auto tCrA_view = make_tensor(tCrA.data(), remove_swizzle(tCrA.layout()));
     copy(tiled_copy_A, tCsA(_, _, 0), tCrA_copy_view(_, _, 0));
     CUTE_UNROLL
@@ -319,26 +344,29 @@ public:
 namespace tl {
 
 template <int M, int N, int K, int num_warp_m, int num_warp_n, bool trans_A,
-          bool trans_B, typename A_type, typename B_type, typename C_type>
+          bool trans_B, bool clear_accum, typename A_type, typename B_type,
+          typename C_type>
 CUTLASS_DEVICE void gemm_ss(A_type *pA, B_type *pB, C_type *accum) {
   using MMA = cute::GemmTensorOp<M, N, K, num_warp_m, num_warp_n, trans_A,
-                                 trans_B, A_type, B_type, C_type>;
+                                 trans_B, clear_accum, A_type, B_type, C_type>;
   MMA::body(pA, pB, accum);
 }
 
 template <int M, int N, int K, int num_warp_m, int num_warp_n, bool trans_A,
-          bool trans_B, typename A_type, typename B_type, typename C_type>
+          bool trans_B, bool clear_accum, typename A_type, typename B_type,
+          typename C_type>
 CUTLASS_DEVICE void gemm_rs(A_type *pA, B_type *pB, C_type *accum) {
   using MMA = cute::GemmTensorOp<M, N, K, num_warp_m, num_warp_n, trans_A,
-                                 trans_B, A_type, B_type, C_type>;
+                                 trans_B, clear_accum, A_type, B_type, C_type>;
   MMA::body_rs(pA, pB, accum);
 }
 
 template <int M, int N, int K, int num_warp_m, int num_warp_n, bool trans_A,
-          bool trans_B, typename A_type, typename B_type, typename C_type>
+          bool trans_B, bool clear_accum, typename A_type, typename B_type,
+          typename C_type>
 CUTLASS_DEVICE void gemm_sr(A_type *pA, B_type *pB, C_type *accum) {
   using MMA = cute::GemmTensorOp<M, N, K, num_warp_m, num_warp_n, trans_A,
-                                 trans_B, A_type, B_type, C_type>;
+                                 trans_B, clear_accum, A_type, B_type, C_type>;
   MMA::body_sr(pA, pB, accum);
 }
 

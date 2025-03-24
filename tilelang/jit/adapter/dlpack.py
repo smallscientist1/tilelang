@@ -1,4 +1,4 @@
-# Copyright (c) Microsoft Corporation.
+# Copyright (c) Tile-AI Corporation.
 # Licensed under the MIT License.
 """The profiler and convert to torch utils"""
 
@@ -26,7 +26,7 @@ class TorchDLPackKernelAdapter(BaseKernelAdapter):
 
             for i in range(len(self.params)):
                 if i in self.result_idx:
-                    dtype = torch.__getattribute__(str(self.params[i].dtype))
+                    dtype = self.params[i].dtype
                     shape = list(map(int, self.params[i].shape))
                     tensor = torch.empty(*shape, dtype=dtype, device=device)
                 else:

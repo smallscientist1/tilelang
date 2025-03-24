@@ -1,4 +1,4 @@
-# Copyright(c) Microsoft Corporation.
+# Copyright(c) Tile-AI Corporation.
 # Licensed under the MIT License.
 # Learn a lot from the MLC - LLM Project
 # https: // github.com/mlc-ai/mlc-llm/blob/main/CMakeLists.txt
@@ -156,6 +156,10 @@ if(USE_CUDA)
   endif()
 
   message(STATUS "CUDA Toolkit includes: ${CUDAToolkit_INCLUDE_DIRS}")
+  set(CUDA_MAJOR_VERSION ${CUDAToolkit_VERSION_MAJOR})
+  message(STATUS "Setting CUDA_MAJOR_VERSION=${CUDA_MAJOR_VERSION}")
+  add_compile_definitions(CUDA_MAJOR_VERSION=${CUDA_MAJOR_VERSION})
+  
   list(APPEND TILE_LANG_INCLUDES ${CUDAToolkit_INCLUDE_DIRS})
 endif(USE_CUDA)
 

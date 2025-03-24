@@ -1,4 +1,4 @@
-# Copyright (c) Tile-AI Corporation.
+# Copyright (c) Tile-AI Organization.
 # Licensed under the MIT License.
 """The profiler and convert to torch utils"""
 
@@ -7,10 +7,12 @@ import ctypes
 from typing import List, Optional, Union, Callable, Dict, Tuple, Any
 from tilelang import tvm as tvm
 from tvm.target import Target
-from tvm.relay import TensorType
+from tilelang.engine.param import KernelParam
 from tvm import tir
+from tvm.relay import TensorType
 from tilelang.jit.adapter.wrapper import TLWrapper
 from tilelang.jit.adapter.libgen import LibraryGenerator
+from tilelang.jit.adapter.utils import is_cuda_target, is_hip_target, is_cpu_target
 from tilelang.utils.target import determine_target
 from tilelang.utils.language import retrieve_func_from_module
 from tilelang.utils.tensor import map_torch_type
@@ -130,8 +132,11 @@ class CythonKernelAdapter(BaseKernelAdapter):
     """
 
     # Class attributes to store compiled kernel information
-    target: str = "cuda"
+    target: Union[str, Target] = "cuda"
     ir_module: Optional[tvm.IRModule] = None
+    # The global source code of the kernel -> global means the source code of the kernel
+    # that is not wrapped by the wrapper code
+    kernel_global_source: Optional[str] = None
     lib: Optional[ctypes.CDLL] = None  # Compiled library handle
     wrapped_source: Optional[str] = None  # Generated C++ wrapper code
     # Maps symbolic variables to their corresponding buffer and shape indices
@@ -143,65 +148,120 @@ class CythonKernelAdapter(BaseKernelAdapter):
     #     "A": [(0, 16), (1, 16)] -> represents A.shape = (16, 16)
     # }
     static_shape_map: Optional[Dict[tir.Var, Tuple[int, List[Tuple[int, int]]]]] = None
+    # Maps buffer variables to their corresponding devices
+    buffer_device_map: Optional[Dict[tir.Var, Tuple[int, torch.device]]] = None
     # Pass configs for the compiler
     pass_configs: Optional[Dict[str, Any]] = None
 
     def __init__(self,
-                 rt_mod,
-                 params: List[TensorType],
+                 params: List[KernelParam],
                  result_idx: List[int],
-                 target,
+                 target: Union[str, Target],
                  func_or_mod: Union[tir.PrimFunc, tvm.IRModule],
+                 host_mod: Optional[tvm.IRModule] = None,
+                 device_mod: Optional[tvm.IRModule] = None,
+                 kernel_global_source: Optional[str] = None,
                  verbose: bool = False,
                  pass_configs: Optional[Dict[str, Any]] = None):
         """Initialize the adapter with the given TIR function or module.
         
         Args:
-            rt_mod: Runtime module
             params: List of tensor types for inputs/outputs
             result_idx: Indices of output tensors
             target: Target platform (e.g., 'cuda')
             func_or_mod: TIR function or module to be compiled
             verbose: Enable verbose logging
         """
-        self.mod = rt_mod
         self.params = params
         self.result_idx = self._legalize_result_idx(result_idx)
+        self.kernel_global_source = kernel_global_source
 
         if isinstance(func_or_mod, tir.PrimFunc):
             self.ir_module = tvm.IRModule({func_or_mod.attrs["global_symbol"]: func_or_mod})
         else:
             self.ir_module = func_or_mod
 
+        self.target = Target.canon_target(determine_target(target))
+
         self.dynamic_symbolic_map = self._process_dynamic_symbolic()
         self.buffer_dtype_map = self._process_buffer_dtype()
         self.static_shape_map = self._process_static_shape()
+        self.buffer_device_map = self._process_buffer_device()
 
-        self.target = Target.canon_target(determine_target(target))
         self.verbose = verbose
         self.wrapper = TLWrapper(self.target)
         self.lib_generator = LibraryGenerator(self.target)
 
         self.wrapper.assign_optimized_module(self.ir_module)
         self.wrapper.assign_pass_configs(pass_configs)
+        self.wrapper.assign_host_module(host_mod)
+        self.wrapper.assign_device_module(device_mod)
         self.wrapped_source = self.wrapper.wrap(self.get_kernel_source(kernel_only=True))
 
         self.lib_generator.update_lib_code(self.wrapped_source)
         self.lib_generator.compile_lib()
         self.lib = self.lib_generator.load_lib()
 
-        try:
-            self.lib.init()
-        except Exception as e:
-            raise Exception(
-                f"Failed to initialize the compiled library for {self.target}: {e}") from e
+        self.lib.get_last_error.restype = ctypes.c_char_p
+        result = self.lib.init()
+        if result != 0:
+            error_msg = self.lib.get_last_error().decode('utf-8')
+            raise RuntimeError(f"Initialization failed: {error_msg}")
 
         self.cython_wrapper = CythonKernelWrapper(self.result_idx, self.params, self.lib)
         self.cython_wrapper.set_dynamic_symbolic_map(self.dynamic_symbolic_map)
         self.cython_wrapper.set_buffer_dtype_map(self.buffer_dtype_map)
         self.cython_wrapper.set_static_shape_map(self.static_shape_map)
-
+        self.cython_wrapper.set_buffer_device_map(self.buffer_device_map)
         self._post_init()
+
+    @classmethod
+    def from_database(cls,
+                      params: List[TensorType],
+                      result_idx: List[int],
+                      target: str,
+                      func_or_mod: Union[tir.PrimFunc, tvm.IRModule],
+                      kernel_global_source: str,
+                      kernel_lib_path: str,
+                      verbose: bool = False,
+                      pass_configs: Optional[Dict[str, Any]] = None):
+        adapter = cls.__new__(cls)
+        adapter.params = params
+        adapter.result_idx = adapter._legalize_result_idx(result_idx)
+        adapter.kernel_global_source = kernel_global_source
+        adapter.wrapped_source = kernel_global_source
+
+        if isinstance(func_or_mod, tir.PrimFunc):
+            adapter.ir_module = tvm.IRModule({func_or_mod.attrs["global_symbol"]: func_or_mod})
+        else:
+            adapter.ir_module = func_or_mod
+
+        target = determine_target(target, return_object=True)
+        adapter.target = Target.canon_target(determine_target(target))
+
+        adapter.dynamic_symbolic_map = adapter._process_dynamic_symbolic()
+        adapter.buffer_dtype_map = adapter._process_buffer_dtype()
+        adapter.static_shape_map = adapter._process_static_shape()
+        adapter.buffer_device_map = adapter._process_buffer_device()
+
+        adapter.verbose = verbose
+        adapter.lib_generator = LibraryGenerator(adapter.target)
+        adapter.lib = adapter.lib_generator.load_lib(lib_path=kernel_lib_path)
+
+        adapter.lib.get_last_error.restype = ctypes.c_char_p
+        result = adapter.lib.init()
+        if result != 0:
+            error_msg = adapter.lib.get_last_error().decode('utf-8')
+            raise RuntimeError(f"Initialization failed: {error_msg}")
+
+        adapter.cython_wrapper = CythonKernelWrapper(adapter.result_idx, adapter.params,
+                                                     adapter.lib)
+        adapter.cython_wrapper.set_dynamic_symbolic_map(adapter.dynamic_symbolic_map)
+        adapter.cython_wrapper.set_buffer_dtype_map(adapter.buffer_dtype_map)
+        adapter.cython_wrapper.set_static_shape_map(adapter.static_shape_map)
+        adapter.cython_wrapper.set_buffer_device_map(adapter.buffer_device_map)
+        adapter._post_init()
+        return adapter
 
     def _process_dynamic_symbolic(self) -> Dict[tir.Var, Tuple[int, int]]:
         """Extract information about dynamic shapes from the TIR function.
@@ -258,6 +318,30 @@ class CythonKernelAdapter(BaseKernelAdapter):
                 static_shape_map[name] = (i, static_shape)
         return static_shape_map
 
+    def _process_buffer_device(self) -> Dict[tir.Var, Tuple[int, torch.device]]:
+        """Extract information about buffer devices from the TIR function.
+        
+        Maps buffer variables to their corresponding devices.
+        """
+        func = self.prim_func
+        params = func.params
+        buffer_map = func.buffer_map
+        buffer_device_map = {}
+        device = None
+        if is_cuda_target(self.target) or is_hip_target(self.target):
+            device = torch.device("cuda")
+        elif is_cpu_target(self.target):
+            device = torch.device("cpu")
+        else:
+            raise ValueError(f"Unsupported target: {self.target}")
+
+        for i, param in enumerate(params):
+            if param in buffer_map:
+                buffer = buffer_map[param]
+                name = buffer.name
+                buffer_device_map[name] = (i, device)
+        return buffer_device_map
+
     def _forward_from_prebuild_lib(self, *args, stream: Optional[int] = None):
         """Low-level function to call the compiled CUDA kernel.
         
@@ -305,7 +389,7 @@ class CythonKernelAdapter(BaseKernelAdapter):
     def get_kernel_source(self, kernel_only: bool = False):
         """Returns the source code of the compiled kernel."""
         if kernel_only:
-            return self.mod.imported_modules[0].get_source()
+            return self.kernel_global_source
         else:
             assert self.wrapped_source is not None, "Wrapped source is not available"
             return self.wrapped_source

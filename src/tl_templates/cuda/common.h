@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft Corporation.
+// Copyright (c) Tile-AI Corporation.
 // Licensed under the MIT License.
 #pragma once
 
@@ -24,6 +24,7 @@ using int4_t = int4;
 #define ushort unsigned short
 
 #define TL_DEVICE __forceinline__ __device__
+#define TL_DEVICE_NOINLINE __noinline__ __device__
 
 // Pack two half values.
 TL_DEVICE unsigned __pack_half2(const half x, const half y) {

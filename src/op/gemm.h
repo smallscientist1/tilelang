@@ -1,4 +1,4 @@
-// Copyright (c) Microsoft Corporation.
+// Copyright (c) Tile-AI Corporation.
 // Licensed under the MIT License.
 
 /*!
@@ -30,15 +30,19 @@ public:
   } policy;
 
 private:
-  std::pair<int, int> ComputeWarpPartition(int num_warps, Target target) const;
+  std::pair<int, int>
+  ComputeWarpPartition(int num_warps, Target target,
+                       bool maybe_hopper_wgmma = true) const;
 
   Array<PrimExpr> call_args;
   tir::Buffer A, B, C;
   bool trans_A, trans_B;
   int M, N, K;
+  bool clear_accum = false;
   // k_pack please ref to bitblas/tl/mfma_macro_generator.py::k_pack
   // only will be enabled under cdna mfma instructions
   int kPack = 1;
+  int wg_wait = 0;
   bool completed_ = false;
 };
 

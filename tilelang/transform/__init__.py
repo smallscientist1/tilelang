@@ -1,4 +1,4 @@
-# Copyright (c) Microsoft Corporation.
+# Copyright (c) Tile-AI Corporation.
 # Licensed under the MIT License.
 """Wrapping transformations."""
 # pylint: disable=invalid-name, unsupported-binary-operation
@@ -81,7 +81,8 @@ def LowerHopperIntrin():
     fpass : tvm.transform.Pass
         The result pass
     """
-    return _ffi_api.LowerHopperIntrin()  # type: ignore
+    return _ffi_api.LowerHopperIntrin() \
+        if hasattr(_ffi_api, "LowerHopperIntrin") else lambda f: f # type: ignore
 
 
 def WarpSpecializedPipeline():
@@ -136,6 +137,28 @@ def ThreadPartialSync(storage_scope: str):
         The result pass
     """
     return _ffi_api.ThreadPartialSync(storage_scope)  # type: ignore
+
+
+def IfStmtBinding():
+    """IfStmtBinding
+
+    Returns
+    -------
+    fpass : tvm.transform.Pass
+        The result pass
+    """
+    return _ffi_api.IfStmtBinding()  # type: ignore
+
+
+def MergeIfStmt():
+    """MergeIfStmt
+
+    Returns
+    -------
+    fpass : tvm.transform.Pass
+        The result pass
+    """
+    return _ffi_api.MergeIfStmt()  # type: ignore
 
 
 def MultiVersionBuffer():
@@ -224,3 +247,29 @@ def VectorizeLoop(enable_vectorize: bool = True):
         The result pass
     """
     return _ffi_api.VectorizeLoop(enable_vectorize)  # type: ignore
+
+
+def InjectPTXAsyncCopy():
+    """Rewrite global to shared memory copy on CUDA with asynchronous copy.
+
+    Returns
+    -------
+    fpass : tvm.transform.Pass
+        The result pass
+    """
+    return _ffi_api.InjectPTXAsyncCopy()  # type: ignore
+
+
+def LowerDeviceStorageAccessInfo():
+    """Lower attached storage access information on device.
+
+    Returns
+    -------
+    fpass : tvm.transform.Pass
+        The result pass
+
+    Note
+    ----
+    Run this pass after all storage access analysis finish.
+    """
+    return _ffi_api.LowerDeviceStorageAccessInfo()  # type: ignore

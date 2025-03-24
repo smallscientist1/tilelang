@@ -1,4 +1,4 @@
-# Copyright (c) Microsoft Corporation.
+# Copyright (c) Tile-AI Organization.
 # Licensed under the MIT License.
 
 import torch
@@ -6,7 +6,6 @@ import torch.backends
 from tilelang import tvm as tvm
 import tilelang.testing
 from tvm import DataType
-import tilelang as TL
 import tilelang.language as T
 from tilelang.intrinsics import get_swizzle_layout
 from tilelang.intrinsics.mma_macro_generator import (
@@ -182,8 +181,10 @@ def tl_matmul(
 
 def assert_tl_matmul_correctness(M, N, K, in_dtype, out_dtype, accum_dtype):
     matmul = tl_matmul(M, N, K, in_dtype, out_dtype, accum_dtype)
-    mod, params = TL.lower(matmul)
-    src_code = mod.imported_modules[0].get_source()
+    kernel = tilelang.compile(matmul, out_idx=[2])
+    profiler = kernel.get_profiler()
+
+    src_code = kernel.get_kernel_source()
     # src_code is the generated cuda source
     assert src_code is not None
 
@@ -201,13 +202,9 @@ def assert_tl_matmul_correctness(M, N, K, in_dtype, out_dtype, accum_dtype):
         A = torch.randn(M, K).to(in_dtype).cuda() - 0.5
         B = torch.randn(N, K).to(in_dtype).cuda() - 0.5
 
-    C = torch.zeros(M, N, device="cuda", dtype=accum_dtype)
+    C = kernel(A, B)
 
-    mod = TL.Profiler(mod, params, [], TL.TensorSupplyType.Integer)
-
-    mod(A, B, C)
-
-    latency = mod.do_bench(mod.func, warmup=25)
+    latency = profiler.do_bench()
 
     # Ensure that the latency is not None
     assert latency is not None
@@ -222,8 +219,13 @@ def assert_tl_matmul_correctness(M, N, K, in_dtype, out_dtype, accum_dtype):
 def test_assert_tl_matmul():
     assert_tl_matmul_correctness(128, 128, 128, "float16", "float16", "float16")
     assert_tl_matmul_correctness(128, 256, 256, "float16", "float32", "float32")
-    assert_tl_matmul_correctness(128, 128, 128, "bfloat16", "float32", "float32")
     assert_tl_matmul_correctness(128, 256, 256, "int8", "int32", "int32")
+
+
+@tilelang.testing.requires_cuda
+@tilelang.testing.requires_cuda_compute_version(8, 0)
+def test_assert_tl_matmul_bfloat16():
+    assert_tl_matmul_correctness(256, 256, 256, "bfloat16", "float32", "float32")
 
 
 @tilelang.testing.requires_cuda
