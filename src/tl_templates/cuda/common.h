@@ -170,6 +170,12 @@ TL_DEVICE void DP4A(InDatatype *a, InDatatype *b, OutDatatype *c) {
   *c = __dp4a(a_int, b_int, c_int);
 }
 
+// fast tanh
+template<typename InDatatype, typename OutDatatype>
+TL_DEVICE void fasttanh(InDatatype* a, OutDatatype* b) {
+  *b = cutlass::fast_tanh(*a);
+}
+
 namespace tl {
 // Any
 template <typename T> TL_DEVICE bool Any(T *a, int size) {
