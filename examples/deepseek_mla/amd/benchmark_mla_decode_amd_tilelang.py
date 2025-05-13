@@ -289,9 +289,9 @@ if __name__ == "__main__":
     pv_flops = 2 * batch * heads * kv_ctx * dim
     total_flops = qk_flops + pv_flops
     BLOCK_N = 16
-    BLOCK_H = 32
+    BLOCK_H = 64
     num_split = 16
-    threads = 128
+    threads = 256
 
     program = flashmla_decode(batch, heads, kv_heads, kv_ctx, dim, pe_dim, BLOCK_N, BLOCK_H,
                               num_split, threads=threads)
