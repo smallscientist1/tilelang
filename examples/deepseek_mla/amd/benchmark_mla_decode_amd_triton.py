@@ -164,8 +164,8 @@ def _mla_attn(
     head_dim_ckv = q_nope.shape[-1]
     head_dim_kpe = q_pe.shape[-1]
 
-    BLOCK_H = 16
-    BLOCK_N = 64
+    BLOCK_H = 64
+    BLOCK_N = 16
     grid = (
         triton.cdiv(head_num, BLOCK_H),
         batch_size,
@@ -319,7 +319,7 @@ def run_flash_mla_triton(q, block_table, blocked_k, max_seqlen_pad, block_size, 
                                                                                dv:].contiguous()
 
     def flash_mla_triton():
-        num_kv_splits = 32
+        num_kv_splits = 16
         o = torch.empty([b * s_q, h_q, dv])
         attn_logits = torch.empty([b * s_q, h_q, num_kv_splits, dv + 1])
         mla_decode_triton(
@@ -447,7 +447,7 @@ shape_configs = [{
         True,
     "dtype":
         torch.float16
-} for batch in [64, 128] for seqlen in [1024, 2048, 4096, 8192, 16384] for head in [128]]
+} for batch in [8, 128] for seqlen in [2048, 4096, 8192] for head in [128]]
 
 
 def get_args():
@@ -455,7 +455,7 @@ def get_args():
     parser.add_argument("--baseline", type=str, default="torch")
     parser.add_argument("--target", type=str, default="flash_mla_triton")
     parser.add_argument("--all", action="store_true")
-    parser.add_argument("--one", action="store_true")
+    parser.add_argument("--one", action="store_true", default=True)
     parser.add_argument("--compare", action="store_true")
     args = parser.parse_args()
     return args

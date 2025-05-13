@@ -1,0 +1,13 @@
+(cfy-tilelang) aiscuser@node-0:~/cfy/tilelang/examples/deepseek_mla/amd$ python benchmark_mla_decode_amd_triton.py 
+flash_mla_triton: b=8, s_q=1, mean_seqlens=2055.0, h_q=128, h_kv=1, d=576, dv=512, causal=True, dtype=torch.float16
+perf flash_mla_triton: 5.206 ms, 1 TFLOPS, 4 GB/s
+flash_mla_triton: b=8, s_q=1, mean_seqlens=4103.0, h_q=128, h_kv=1, d=576, dv=512, causal=True, dtype=torch.float16
+perf flash_mla_triton: 6.164 ms, 1 TFLOPS, 6 GB/s
+flash_mla_triton: b=8, s_q=1, mean_seqlens=8199.0, h_q=128, h_kv=1, d=576, dv=512, causal=True, dtype=torch.float16
+perf flash_mla_triton: 6.948 ms, 3 TFLOPS, 11 GB/s
+flash_mla_triton: b=128, s_q=1, mean_seqlens=2175.0, h_q=128, h_kv=1, d=576, dv=512, causal=True, dtype=torch.float16
+perf flash_mla_triton: 23.838 ms, 3 TFLOPS, 15 GB/s
+flash_mla_triton: b=128, s_q=1, mean_seqlens=4223.0, h_q=128, h_kv=1, d=576, dv=512, causal=True, dtype=torch.float16
+perf flash_mla_triton: 35.709 ms, 4 TFLOPS, 18 GB/s
+flash_mla_triton: b=128, s_q=1, mean_seqlens=8319.0, h_q=128, h_kv=1, d=576, dv=512, causal=True, dtype=torch.float16
+perf flash_mla_triton: 52.900 ms, 6 TFLOPS, 24 GB/s
