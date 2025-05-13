@@ -188,14 +188,14 @@ class SparseFlashAttn(torch.nn.Module):
         self.dim_v = dim_v
         self.block_size = block_size
 
-        self.block_H = 32 # 64
+        self.block_H = 16 # 64
 
         program = flashattn(batch, heads, heads_kv, dim, dim_v)(
             block_N=block_size,
             block_H=self.block_H,
             num_split=T.symbolic("num_split"),
             num_stages=0,
-            threads=128,
+            threads=64,
             max_cache_seqlen=T.symbolic("max_cache_seqlen"),
             num_blocks=T.symbolic("num_blocks"))
 
@@ -203,21 +203,23 @@ class SparseFlashAttn(torch.nn.Module):
             import itertools
             BLOCK_N = [32,]
             BLOCK_H = [16, 32, 64, 128]
-            num_split = [1, 2, 4, 8, 16, 32]
+            num_split = [2, 4, 8, 16, 32]
             thread_num = [64, 128]
+            stages = [0, 1, 2]
 
-            _configs = list(itertools.product(BLOCK_N, BLOCK_H, num_split, thread_num))
+            _configs = list(itertools.product(BLOCK_N, BLOCK_H, num_split, thread_num, stages))
 
             return [{
                 "block_N": c[0],
                 "block_H": c[1],
                 "num_split": c[2],
                 "thread_num": c[3],
+                "num_stages": c[4],
             } for c in _configs]
 
-        def wrapped_kernel(block_N=None, block_H=None, num_split=None, thread_num=None):
+        def wrapped_kernel(block_N=None, block_H=None, num_split=None, thread_num=None, num_stages=None):
             return flashattn(batch, heads, heads_kv, dim, dim_v)(block_N, block_H,
-                                num_split, 0, thread_num, max_cache_seqlen=8192, num_blocks=256)
+                                num_split, num_stages, thread_num, max_cache_seqlen=8192, num_blocks=256)
 
         if enable_autotune:
             autotuner = AutoTuner.from_kernel(
@@ -453,7 +455,7 @@ if __name__ == "__main__":
     parser.add_argument('--heads', type=int, default=32, help='heads')
     parser.add_argument('--heads_kv', type=int, default=8, help='heads_kv')
     parser.add_argument(
-        '--max_cache_seqlen', type=int, default=2048, help='kvcache sequence length')
+        '--max_cache_seqlen', type=int, default=8192, help='kvcache sequence length')
     parser.add_argument('--dim', type=int, default=128, help='dim')
     parser.add_argument('--dim_v', type=int, default=128, help='dim_v')
     parser.add_argument('--sparse_ratio', type=float, default=0.8, help='sparse ratio')
@@ -463,6 +465,8 @@ if __name__ == "__main__":
     batch, heads, heads_kv, max_cache_seqlen, dim, dim_v = args.batch, args.heads, args.heads_kv, args.max_cache_seqlen, args.dim, args.dim_v
     sparse_ratio = args.sparse_ratio
     block_size = args.block_size
+    print("batch: ", batch, "heads: ", heads, "heads_kv: ", heads_kv, "max_cache_seqlen: ", max_cache_seqlen,)
+    
     qk_flops = 2 * batch * heads * max_cache_seqlen * dim
     pv_flops = 2 * batch * heads * max_cache_seqlen * dim_v
     total_flops = qk_flops + pv_flops

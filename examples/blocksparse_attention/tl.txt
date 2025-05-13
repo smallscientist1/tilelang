@@ -1,0 +1,12 @@
+batch:  8 heads:  32 heads_kv:  8 max_cache_seqlen:  8192
+max_selected_blocks:  52
+cache_seqlens:  tensor([8192, 8192, 8192, 8192, 8192, 8192, 8192, 8192], device='cuda:0',
+       dtype=torch.int32)
+valid_num_blocks:  tensor([52, 52, 52, 52, 52, 52, 52, 52], device='cuda:0', dtype=torch.int32)
+max_valid_num_blocks:  tensor([256, 256, 256, 256, 256, 256, 256, 256], device='cuda:0',
+       dtype=torch.int32)
+output  all_close=False
+all_close=False, max=0.001739501953125, min=0.0, mean=0.0002758502960205078
+Index: (7, 28, 34), expect: -0.052490234375, actual: -0.054229736328125
+sparse time:  0.4287065863609314
+sparse time ref:  1.0320078134536743
