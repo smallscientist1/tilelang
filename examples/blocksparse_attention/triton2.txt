@@ -1,0 +1,11 @@
+cache_seqlens:  tensor([2048, 2048, 2048, 2048, 2048, 2048, 2048, 2048], device='cuda:0',
+       dtype=torch.int32)
+valid_num_blocks:  tensor([13, 13, 13, 13, 13, 13, 13, 13], device='cuda:0', dtype=torch.int32)
+max_valid_num_blocks:  tensor([64, 64, 64, 64, 64, 64, 64, 64], device='cuda:0', dtype=torch.int32)
+max_valid_num_blocks shape:  torch.Size([8])
+max difference:  tensor(0.0007, device='cuda:0', dtype=torch.float16)
+ref  all_close=True
+Average time: 0.062528 ms
+tflops: 4293075265.85 kflops
+Average time of ref: 138.918518 ms
+Average time of ref2: 0.287611 ms
