@@ -38,6 +38,7 @@ def run_torch_mla(q, block_table, blocked_k, max_seqlen_pad, block_size, b, s_q,
                   h_kv, d, dv, causal, dtype):
     blocked_v = blocked_k[..., :dv]
 
+    @torch.compile
     def ref_mla():
         out = torch.empty(b, s_q, h_q, dv, dtype=torch.float32)
         lse = torch.empty(b, h_q, s_q, dtype=torch.float32)
@@ -382,10 +383,10 @@ def compare_ab(baseline, target, b, s_q, cache_seqlens, h_q, h_kv, d, dv, causal
     bytes = (total_seqlens * h_kv * d + b * s_q * h_q * d + b * s_q * h_q * dv) * (
         torch.finfo(dtype).bits // 8)
     print(
-        f"perf {baseline}: {perf_a:.3f} ms, {FLOPS / 10 ** 9 / perf_a:.0f} TFLOPS, {bytes / 10 ** 6 / perf_a:.0f} GB/s"
+        f"perf {baseline}: {perf_a:.3f} ms, {FLOPS / 10 ** 9 / perf_a:.3f} TFLOPS, {bytes / 10 ** 6 / perf_a:.3f} GB/s"
     )
     print(
-        f"perf {target}: {perf_b:.3f} ms, {FLOPS / 10 ** 9 / perf_b:.0f} TFLOPS, {bytes / 10 ** 6 / perf_b:.0f} GB/s"
+        f"perf {target}: {perf_b:.3f} ms, {FLOPS / 10 ** 9 / perf_b:.3f} TFLOPS, {bytes / 10 ** 6 / perf_b:.3f} GB/s"
     )
     return bytes / 10**6 / perf_a, bytes / 10**6 / perf_b
 
@@ -421,7 +422,7 @@ def compare_a(target, b, s_q, cache_seqlens, h_q, h_kv, d, dv, causal, dtype):
     bytes = (total_seqlens * h_kv * d + b * s_q * h_q * d + b * s_q * h_q * dv) * (
         torch.finfo(dtype).bits // 8)
     print(
-        f"perf {target}: {perf_b:.3f} ms, {FLOPS / 10 ** 9 / perf_b:.0f} TFLOPS, {bytes / 10 ** 6 / perf_b:.0f} GB/s"
+        f"perf {target}: {perf_b:.3f} ms, {FLOPS / 10 ** 9 / perf_b:.3f} TFLOPS, {bytes / 10 ** 6 / perf_b:.3f} GB/s"
     )
     return bytes / 10**6 / perf_b
 
@@ -437,7 +438,7 @@ shape_configs = [{
     "s_q":
         1,
     "cache_seqlens":
-        torch.tensor([seqlen + 2 * i for i in range(batch)], dtype=torch.int32, device="cuda"),
+        torch.tensor([seqlen  for i in range(batch)], dtype=torch.int32, device="cuda"),
     "h_q":
         head,
     "h_kv":
@@ -450,7 +451,7 @@ shape_configs = [{
         True,
     "dtype":
         torch.float16
-} for batch in [128] for seqlen in [1024, 2048, 4096, 8192, 16384] for head in [128]]
+} for batch in [8, 128] for seqlen in [2048, 4096, 8192] for head in [128]]
 
 
 def get_args():
@@ -458,7 +459,7 @@ def get_args():
     parser.add_argument("--baseline", type=str, default="torch")
     parser.add_argument("--target", type=str, default="torch")
     parser.add_argument("--all", action="store_true")
-    parser.add_argument("--one", action="store_true")
+    parser.add_argument("--one", action="store_true", default=True)
     parser.add_argument("--compare", action="store_true")
     args = parser.parse_args()
     return args

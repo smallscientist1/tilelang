@@ -1,0 +1,12 @@
+torch: b=8, s_q=1, mean_seqlens=2048.0, h_q=128, h_kv=1, d=576, dv=512, causal=True, dtype=torch.float16
+perf torch: 23.015 ms, 0.198 TFLOPS, 0.917 GB/s
+torch: b=8, s_q=1, mean_seqlens=4096.0, h_q=128, h_kv=1, d=576, dv=512, causal=True, dtype=torch.float16
+perf torch: 43.030 ms, 0.212 TFLOPS, 0.929 GB/s
+torch: b=8, s_q=1, mean_seqlens=8192.0, h_q=128, h_kv=1, d=576, dv=512, causal=True, dtype=torch.float16
+perf torch: 82.984 ms, 0.220 TFLOPS, 0.937 GB/s
+torch: b=128, s_q=1, mean_seqlens=2048.0, h_q=128, h_kv=1, d=576, dv=512, causal=True, dtype=torch.float16
+perf torch: 368.356 ms, 0.198 TFLOPS, 0.917 GB/s
+torch: b=128, s_q=1, mean_seqlens=4096.0, h_q=128, h_kv=1, d=576, dv=512, causal=True, dtype=torch.float16
+perf torch: 688.808 ms, 0.212 TFLOPS, 0.929 GB/s
+torch: b=128, s_q=1, mean_seqlens=8192.0, h_q=128, h_kv=1, d=576, dv=512, causal=True, dtype=torch.float16
+perf torch: 1326.439 ms, 0.220 TFLOPS, 0.938 GB/s

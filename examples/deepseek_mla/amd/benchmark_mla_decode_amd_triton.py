@@ -434,7 +434,7 @@ shape_configs = [{
     "s_q":
         1,
     "cache_seqlens":
-        torch.tensor([seqlen + 2 * i for i in range(batch)], dtype=torch.int32, device="cuda"),
+        torch.tensor([seqlen for i in range(batch)], dtype=torch.int32, device="cuda"),
     "h_q":
         head,
     "h_kv":
