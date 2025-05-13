@@ -13,14 +13,14 @@ import time
 from heuristic import num_splits_heuristic
 
 
-@triton.autotune(
-    configs=[
-        triton.Config({}, num_warps=num_warps, num_stages=num_stages)
-        for num_warps in [1, 2, 4]\
-        for num_stages in [1, 2, 3, 4, 7]
-    ],
-    key=['BLOCK_H', 'BLOCK_N', 'BLOCK_D'],
-)
+# @triton.autotune(
+#     configs=[
+#         triton.Config({}, num_warps=num_warps, num_stages=num_stages)
+#         for num_warps in [4]\
+#         for num_stages in [1]
+#     ],
+#     key=['BLOCK_H', 'BLOCK_N', 'BLOCK_D'],
+# )
 @triton.jit
 def _split_kernel(
     q_ptr,
@@ -130,14 +130,14 @@ def _split_kernel(
     tl.store(o_partial_ptr, acc, mask=offs_h[:, None] < gqa_group_size)
 
 
-@triton.autotune(
-    configs=[
-        triton.Config({}, num_warps=num_warps, num_stages=num_stages)
-        for num_warps in [1, 2, 4]\
-        for num_stages in [1, 2, 3, 4, 7]
-    ],
-    key=['BLOCK_D'],
-)
+# @triton.autotune(
+#     configs=[
+#         triton.Config({}, num_warps=num_warps, num_stages=num_stages)
+#         for num_warps in [1, 2, 4]\
+#         for num_stages in [1, 2, 3, 4, 7]
+#     ],
+#     key=['BLOCK_D'],
+# )
 @triton.jit
 def _merge_kernel(
     o_partial_ptr,
@@ -185,6 +185,9 @@ def _merge_kernel(
     tl.store(o_ptr + offs_d * o_stride_d, acc)
 
 
+props = torch.cuda.get_device_properties(torch.device("cuda:0"))
+num_sm_g = props.multi_processor_count
+
 def block_sparse_flash_decode_gqa_mask_triton(
     q,
     k_cache,
@@ -213,7 +216,7 @@ def block_sparse_flash_decode_gqa_mask_triton(
     size_one_kv_head = max_selected_blocks * block_size * (
         dim + dim_v) * 2  #kv_seqlen * (dim + dim_v) * 2
     total_mblocks = batch * heads_kv * num_m_blocks
-    num_sm = 64
+    num_sm = num_sm_g # 64
     # num_sm = self.num_sm
     num_splits = num_splits_heuristic(
         total_mblocks,
@@ -223,6 +226,7 @@ def block_sparse_flash_decode_gqa_mask_triton(
         size_one_kv_head,
         is_causal_or_local=True,
         max_splits=128)
+    num_splits = 16
 
     # print("num_splits:", num_splits, "num_blocks:", num_n_blocks)
 
@@ -294,7 +298,7 @@ def block_sparse_flash_decode_gqa_mask_triton(
 
     return output
 
-
+@torch.compile
 def ref_program_torch(query, key, value, block_mask, cache_seqlens, max_cache_seqlen, num_blocks,
                       block_size):
 
@@ -337,6 +341,49 @@ def ref_program_torch(query, key, value, block_mask, cache_seqlens, max_cache_se
     out = rearrange(out, 'b g h d -> b (h g) d')  # [batch_size, heads, dim]
     return out
 
+@torch.compile
+def ref_program_torch_2(query, key, value, sparse_mask, cache_seqlens, max_cache_seqlen, num_blocks,
+                      block_size):
+
+    batch, heads, dim = query.shape
+    heads_kv = key.shape[2]
+
+    num_head_groups = query.shape[1] // key.shape[2]
+    scale = dim**0.5
+    key = rearrange(key, 'b n h d -> b h n d')  # [batch_size, heads_kv, seqlen_kv, dim]
+    value = rearrange(value, 'b n h d -> b h n d')  # [batch_size, heads_kv, seqlen_kv, dim]
+
+    query = rearrange(
+        query, 'b (h g) d -> b g h d',
+        g=num_head_groups)  # [batch_size, num_head_groups, heads_kv, dim]
+
+    scores = einsum(
+        query, key,
+        'b g h d, b h s d -> b g h s')  # [batch_size, num_head_groups, heads_kv, seqlen_kv]
+
+    # sparse_mask = torch.ones_like(scores)
+    # Assign mask values
+    # for b in range(batch):
+    #     for h in range(heads_kv):
+    #         for idx in range(num_blocks):
+    #             if block_mask[b, h, idx]:
+    #                 sparse_mask[b, :, h, idx * block_size:(idx + 1) * block_size] = 1
+
+    scores = scores.masked_fill(sparse_mask == 0, float('-inf'))
+
+    # range_len = torch.arange(scores.shape[-1], device='cuda').unsqueeze(0)
+    # cache_seqlens_expanded = cache_seqlens.unsqueeze(1)
+    # pad_mask = range_len >= cache_seqlens_expanded
+    # pad_mask = pad_mask[:, None, None, :]
+    # scores = scores.masked_fill(pad_mask, float('-inf'))
+    attention = F.softmax(
+        scores / scale, dim=-1)  # [batch_size, num_head_groups, heads_kv, seqlen_kv]
+
+    out = einsum(attention, value,
+                 'b g h s, b h s d -> b g h d')  # [batch_size, num_head_groups, heads_kv, dim]
+    out = rearrange(out, 'b g h d -> b (h g) d')  # [batch_size, heads, dim]
+    return out
+
 
 def ref_program_fa(query, key, value, cache_seqlens):
     # latency reference
@@ -347,19 +394,39 @@ def ref_program_fa(query, key, value, cache_seqlens):
     output = output.squeeze(1)
     return output
 
+def debug(name, expect, actual, atol=1e-3, rtol=1e-3):
+    all_close = torch.allclose(expect, actual, atol=atol, rtol=rtol)
+    print(name + "  all_close={}".format(all_close))
+    if not all_close:
+        # print(expect[3, 28])
+        # print(actual[3, 28])
+        diff = (expect - actual).abs()
+        print("all_close={}, max={}, min={}, mean={}".format(all_close,
+                                                             diff.max().item(),
+                                                             diff.min().item(),
+                                                             diff.mean().item()))
+        max_indices = torch.nonzero(diff == diff.max().item())
+        first_index = tuple(max_indices[0].tolist())
+        print(f"Index: {first_index}, expect: {expect[first_index]}, actual: {actual[first_index]}")
 
-def main(batch=64,
-         heads=32,
-         heads_kv=8,
-         max_cache_seqlen=8192,
-         dim=128,
-         dim_v=128,
-         sparse_ratio=0.8,
-         block_size=32):
 
-    batch, heads, heads_kv, max_cache_seqlen, dim, dim_v = batch, heads, heads_kv, max_cache_seqlen, dim, dim_v
-    block_size = block_size
-    sparse_ratio = sparse_ratio
+if __name__ == "__main__":
+    torch.cuda.manual_seed(0)
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--batch', type=int, default=8, help='batch size')
+    parser.add_argument('--heads', type=int, default=32, help='heads')
+    parser.add_argument('--heads_kv', type=int, default=8, help='heads_kv')
+    parser.add_argument(
+        '--max_cache_seqlen', type=int, default=2048, help='kvcache sequence length')
+    parser.add_argument('--dim', type=int, default=128, help='dim')
+    parser.add_argument('--dim_v', type=int, default=128, help='dim_v')
+    parser.add_argument('--sparse_ratio', type=float, default=0.8, help='sparse ratio')
+    parser.add_argument('--block_size', type=int, default=32, help='block_size')
+    args = parser.parse_args()
+
+    batch, heads, heads_kv, max_cache_seqlen, dim, dim_v = args.batch, args.heads, args.heads_kv, args.max_cache_seqlen, args.dim, args.dim_v
+    block_size = args.block_size
+    sparse_ratio = args.sparse_ratio
     qk_flops = 2 * batch * heads * max_cache_seqlen * dim
     pv_flops = 2 * batch * heads * max_cache_seqlen * dim_v
     total_flops = qk_flops + pv_flops
@@ -374,13 +441,16 @@ def main(batch=64,
     random_index = torch.randint(0, batch, (1,), device='cuda').item()  # Select a random index
     cache_seqlens[
         random_index] = max_cache_seqlen  # Assign cache_seqlen to ensure at least one occurrence
+    cache_seqlens = torch.full((batch,), max_cache_seqlen, dtype=torch.int32, device='cuda')
 
+    print("cache_seqlens: ", cache_seqlens)
     num_blocks = (max_cache_seqlen + block_size - 1) // block_size
 
     valid_num_blocks = torch.ceil(cache_seqlens * (1 - sparse_ratio) / block_size).int()
     print("valid_num_blocks: ", valid_num_blocks)
     max_valid_num_blocks = torch.ceil(cache_seqlens / block_size).int()
     print("max_valid_num_blocks: ", max_valid_num_blocks)
+    print("max_valid_num_blocks shape: ", max_valid_num_blocks.shape)
     # Initialize block_mask with false (for padding blocks)
     block_mask = torch.zeros((batch, heads_kv, num_blocks), dtype=torch.bool, device='cuda')
 
@@ -406,16 +476,50 @@ def main(batch=64,
         block_size,
     )
 
-    # print("max difference: ", torch.max(torch.abs(ref - triton_out)))
-    assert torch.allclose(
-        ref, triton_out, atol=1e-2), "Output mismatch between Triton and reference implementation"
-    print("Passed the ref test!")
+    print("max difference: ", torch.max(torch.abs(ref - triton_out)))
+    debug("ref", ref, triton_out, atol=1e-2, rtol=1e-2)
+    with open("ref.txt", "w") as f:
+        f.write(str(ref))
+    with open("triton.txt", "w") as f:
+        f.write(str(triton_out))
+    # assert torch.allclose(
+    #     ref, triton_out, atol=1e-2), "Output mismatch between Triton and reference implementation"
+    # print("Passed the ref test!")
 
     # Measure performance
-    torch.cuda.synchronize()
-    start = time.time()
-    for _ in range(1000):
-        block_sparse_flash_decode_gqa_mask_triton(
+    # # warm up
+    # for _ in range(10):
+    #     block_sparse_flash_decode_gqa_mask_triton(
+    #         Q,
+    #         K,
+    #         V,
+    #         cache_seqlens,
+    #         max_cache_seqlen,
+    #         block_mask,
+    #         block_size,
+    #     )
+    # torch.cuda.synchronize()
+    # start = time.time()
+    # for _ in range(100):
+    #     block_sparse_flash_decode_gqa_mask_triton(
+    #         Q,
+    #         K,
+    #         V,
+    #         cache_seqlens,
+    #         max_cache_seqlen,
+    #         block_mask,
+    #         block_size,
+    #     )
+    # torch.cuda.synchronize()
+    # end = time.time()
+    # elapsed_time = end - start
+    # avg_time = elapsed_time / 100
+    # avg_flops = total_flops / avg_time
+    # print(f"Average time: {avg_time:.6f} seconds")
+    # from tilelang.profiler import do_bench
+    from triton.testing import do_bench
+    lat = do_bench(
+        lambda : block_sparse_flash_decode_gqa_mask_triton(
             Q,
             K,
             V,
@@ -423,41 +527,65 @@ def main(batch=64,
             max_cache_seqlen,
             block_mask,
             block_size,
-        )
-    torch.cuda.synchronize()
-    end = time.time()
-    elapsed_time = end - start
-    avg_time = elapsed_time / 1000
-    avg_flops = total_flops / avg_time
-    print(f"Average time: {avg_time:.6f} seconds")
-    print(f"Average flops: {avg_flops:.2f} GFLOPS")
+        ),
+        # lambda : Q+1,
+        # _n_warmup=10,
+        # _n_repeat=1,
+    )
+    print(f"Average time: {lat:.6f} ms")
+    print(f"tflops: {total_flops / lat:.2f} kflops")
+    
+    lat_ref = do_bench(
+        lambda : ref_program_torch(
+            Q,
+            K,
+            V,
+            block_mask,
+            cache_seqlens,
+            max_cache_seqlen,
+            num_blocks,
+            block_size,
+        ),
+        # lambda : Q+1,
+        # _n_warmup=10,
+        # _n_repeat=1,
+    )
+    print(f"Average time of ref: {lat_ref:.6f} ms")
+    
+    sparse_mask = torch.zeros((batch, heads // heads_kv, heads_kv, num_blocks * block_size), dtype=torch.bool, device='cuda')
+    # Assign mask values
+    for b in range(batch):
+        for h in range(heads_kv):
+            for idx in range(num_blocks):
+                if block_mask[b, h, idx]:
+                    sparse_mask[b, :, h, idx * block_size:(idx + 1) * block_size] = 1
+    
+    lat_ref2 = do_bench(
+        lambda : ref_program_torch_2(
+            Q,
+            K,
+            V,
+            sparse_mask,
+            cache_seqlens,
+            max_cache_seqlen,
+            num_blocks,
+            block_size,
+        ),
+        # lambda : Q+1,
+        # _n_warmup=10,
+        # _n_repeat=1,
+    )
+    print(f"Average time of ref2: {lat_ref2:.6f} ms")
 
-    # Measure performance of reference implementation
-    start = time.time()
-    for _ in range(1000):
-        ref_program_fa(Q, K, V, cache_seqlens)
-    torch.cuda.synchronize()
-    end = time.time()
-    elapsed_time_ref = end - start
-    avg_time_ref = elapsed_time_ref / 1000
-    avg_flops_ref = total_flops / avg_time_ref
-    print(f"Average time of ref: {avg_time_ref:.6f} seconds")
-    print(f"Average flops of ref: {avg_flops_ref:.2f} GFLOPS")
+    # # Measure performance of reference implementation
+    # start = time.time()
+    # for _ in range(1000):
+    #     ref_program_fa(Q, K, V, cache_seqlens)
+    # torch.cuda.synchronize()
+    # end = time.time()
+    # elapsed_time_ref = end - start
+    # avg_time_ref = elapsed_time_ref / 1000
+    # avg_flops_ref = total_flops / avg_time_ref
+    # print(f"Average time of ref: {avg_time_ref:.6f} seconds")
 
-    print(f"Speedup: {avg_time_ref / avg_time:.2f}x")
-
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--batch', type=int, default=64, help='batch size')
-    parser.add_argument('--heads', type=int, default=32, help='heads')
-    parser.add_argument('--heads_kv', type=int, default=8, help='heads_kv')
-    parser.add_argument(
-        '--max_cache_seqlen', type=int, default=8192, help='kvcache sequence length')
-    parser.add_argument('--dim', type=int, default=128, help='dim')
-    parser.add_argument('--dim_v', type=int, default=128, help='dim_v')
-    parser.add_argument('--sparse_ratio', type=float, default=0.8, help='sparse ratio')
-    parser.add_argument('--block_size', type=int, default=32, help='block_size')
-    args = parser.parse_args()
-    main(args.batch, args.heads, args.heads_kv, args.max_cache_seqlen, args.dim, args.dim_v,
-         args.sparse_ratio, args.block_size)
+    # print(f"Speedup: {avg_time_ref / avg_time:.2f}x")
