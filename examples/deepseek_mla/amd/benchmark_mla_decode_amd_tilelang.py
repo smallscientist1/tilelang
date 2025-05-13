@@ -283,6 +283,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     batch, heads, kv_heads, kv_ctx, dim, pe_dim = args.batch, args.heads, args.kv_heads, args.kv_ctx, args.dim, args.pe_dim
     enable_autotune = args.auto_tune
+    print(f"Batch: {batch}, Heads: {heads}, kv_heads: {kv_heads}, kv_ctx: {kv_ctx}, dim: {dim}, pe_dim: {pe_dim}")
 
     qk_flops = 2 * batch * heads * kv_ctx * (dim + pe_dim)
     pv_flops = 2 * batch * heads * kv_ctx * dim
@@ -302,12 +303,11 @@ if __name__ == "__main__":
     print(f"Tilelang output: {tilelang_output}")
     print(f"Ref output: {ref_output}")
     # torch.testing.assert_close(tilelang_output, ref_output, rtol=0.01, atol=0.01)
-    latency = profiler.do_bench(warmup=500)
+    latency = profiler.do_bench()
     print(f"Latency: {latency} ms")
     print(f"TFlops: {total_flops / latency * 1e-9} TFlops")
     ref_latency = profiler.do_bench(
         ref_program,
-        warmup=500,
     )
     print(f"Ref latency: {ref_latency} ms")
     print(f"Ref TFlops: {total_flops / ref_latency * 1e-9} TFlops")
