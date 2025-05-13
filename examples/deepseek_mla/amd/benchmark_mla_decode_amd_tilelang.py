@@ -276,7 +276,7 @@ if __name__ == "__main__":
     parser.add_argument('--batch', type=int, default=8, help='batch size')
     parser.add_argument('--heads', type=int, default=128, help='q heads number')
     parser.add_argument('--kv_heads', type=int, default=1, help='kv heads number')
-    parser.add_argument('--kv_ctx', type=int, default=8192, help='kv context length')
+    parser.add_argument('--kv_ctx', type=int, default=2048, help='kv context length')
     parser.add_argument('--dim', type=int, default=512, help='head dim')
     parser.add_argument('--pe_dim', type=int, default=64, help='pe head dim')
     parser.add_argument('--auto_tune', action='store_true', help='auto tune')
@@ -290,7 +290,7 @@ if __name__ == "__main__":
     total_flops = qk_flops + pv_flops
     BLOCK_N = 16
     BLOCK_H = 64
-    num_split = 16
+    num_split = 4 # 16
     threads = 256
 
     program = flashmla_decode(batch, heads, kv_heads, kv_ctx, dim, pe_dim, BLOCK_N, BLOCK_H,
