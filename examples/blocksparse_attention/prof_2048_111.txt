@@ -1,0 +1,12 @@
+Dispatch_ID(1277), GPU_ID(31155), Queue_ID(1), Process_ID(440411), Thread_ID(440411), Grid_Size(65536), Workgroup_Size(64), LDS_Per_Workgroup(16896), Scratch_Per_Workitem(0), Arch_VGPR(68), Accum_VGPR(196), SGPR(80), Wave_Size(64), Kernel_Name("main_kernel.kd"), Begin_Timestamp(2857920760482256), End_Timestamp(2857920760677617), Correlation_ID(0)
+Dispatch_ID(1278), GPU_ID(31155), Queue_ID(1), Process_ID(440411), Thread_ID(440411), Grid_Size(32768), Workgroup_Size(128), LDS_Per_Workgroup(0), Scratch_Per_Workitem(0), Arch_VGPR(16), Accum_VGPR(0), SGPR(32), Wave_Size(64), Kernel_Name("main_kernel_1.kd"), Begin_Timestamp(2857920760688337), End_Timestamp(2857920760702417), Correlation_ID(0)
+
+195.3 us + 14 us
+
+
+Dispatch_ID(8157), GPU_ID(31155), Queue_ID(1), Process_ID(441569), Thread_ID(441569), Grid_Size(131072), Workgroup_Size(256), LDS_Per_Workgroup(0), Scratch_Per_Workitem(0), Arch_VGPR(8), Accum_VGPR(0), SGPR(16), Wave_Size(64), Kernel_Name("triton_.kd"), Begin_Timestamp(2858007571439552), End_Timestamp(2858007571445952), Correlation_ID(0)
+Dispatch_ID(8158), GPU_ID(31155), Queue_ID(1), Process_ID(441569), Thread_ID(441569), Grid_Size(4194304), Workgroup_Size(256), LDS_Per_Workgroup(0), Scratch_Per_Workitem(0), Arch_VGPR(8), Accum_VGPR(0), SGPR(16), Wave_Size(64), Kernel_Name("triton_.kd"), Begin_Timestamp(2858007571468352), End_Timestamp(2858007571520032), Correlation_ID(0)
+Dispatch_ID(8159), GPU_ID(31155), Queue_ID(1), Process_ID(441569), Thread_ID(441569), Grid_Size(131072), Workgroup_Size(256), LDS_Per_Workgroup(29184), Scratch_Per_Workitem(0), Arch_VGPR(128), Accum_VGPR(136), SGPR(96), Wave_Size(64), Kernel_Name("Cijk_Ailk_Bljk_HHS_BH_Bias_AS_SAV_MT16x64x64_MI16x16x1_SN_LDSB0_AFC1_AFEM1_AFEM1_ASEM1_CLR1_EPS0_GRVWA4_GRVWB4_ISA90a_IU1_K1_LBSPPA256_LBSPPB128_LBSPPM0_LPA16_LPB16_LRVW8_LWPMn1_MIAV0_MIWT1_1_MO40_NTn1_NTA0_NTB0_NTC0_NTD0_NTM0_NEPBS2_NLCA1_NLCB1_ONLL1_PGR2_PLR1_PKA0_SIA3_SS1_SU4_SUM0_SUS256_SPO1_SRVW0_SSO0_SVW1_TLDS1_USFGROn1_VSn1_VWA1_VWB1_WSGRA0_WSGRB1_WG16_16_1.kd"), Begin_Timestamp(2858007571661153), End_Timestamp(2858007571759073), Correlation_ID(0)
+Dispatch_ID(8160), GPU_ID(31155), Queue_ID(1), Process_ID(441569), Thread_ID(441569), Grid_Size(4194304), Workgroup_Size(256), LDS_Per_Workgroup(2560), Scratch_Per_Workitem(0), Arch_VGPR(8), Accum_VGPR(0), SGPR(16), Wave_Size(64), Kernel_Name("triton_.kd"), Begin_Timestamp(2858007572201016), End_Timestamp(2858007572273656), Correlation_ID(0)
+
+6.4 us + 51.6us + 72.6 us
