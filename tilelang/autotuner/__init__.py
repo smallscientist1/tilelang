@@ -265,7 +265,7 @@ class AutoTuner:
         key = self.generate_cache_key(parameters)
 
         with self._lock:
-            if is_cache_enabled():
+            if False: # is_cache_enabled():
                 # First check in-memory cache
                 if key in self._memory_cache:
                     logger.warning("Found kernel in memory cache. For better performance," \

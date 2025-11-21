@@ -205,9 +205,9 @@ def download_and_extract_llvm(version, is_aarch64=False, extract_path="3rdparty"
         str: The path where the LLVM archive was extracted.
     """
     ubuntu_version = "16.04"
-    if version >= "16.0.0":
+    if version >= "16.0.0" or version == "13.0.0":
         ubuntu_version = "20.04"
-    elif version >= "13.0.0":
+    elif version > "13.0.0":
         ubuntu_version = "18.04"
 
     base_url = (f"https://github.com/llvm/llvm-project/releases/download/llvmorg-{version}")
@@ -241,7 +241,7 @@ package_data = {
     "tilelang": ["py.typed", "*pyx"],
 }
 
-LLVM_VERSION = "10.0.1"
+LLVM_VERSION = "13.0.0" # "10.0.1"
 IS_AARCH64 = False  # Set to True if on an aarch64 platform
 EXTRACT_PATH = "3rdparty"  # Default extraction path
 
@@ -289,7 +289,8 @@ def build_csrc(llvm_config_path):
     # Run CMake and make
     try:
         subprocess.check_call(["cmake", ".."])
-        num_jobs = max(1, int(multiprocessing.cpu_count() * 0.75))
+        # num_jobs = max(1, int(multiprocessing.cpu_count() * 0.75))
+        num_jobs = min(max(1, int(multiprocessing.cpu_count() * 0.75)), 50)
         subprocess.check_call(["make", f"-j{num_jobs}"])
     except subprocess.CalledProcessError as error:
         raise RuntimeError("Failed to build TileLang C Source") from error
@@ -665,7 +666,8 @@ class CMakeBuild(build_ext):
         subprocess.check_call(["cmake", ext.sourcedir] + cmake_args, cwd=build_temp)
 
         # Build the project in "Release" mode with all available CPU cores ("-j").
-        subprocess.check_call(["cmake", "--build", ".", "--config", "Release", "-j"],
+        max_jobs = min(max(1, int(multiprocessing.cpu_count() * 0.75)), 50)
+        subprocess.check_call(["cmake", "--build", ".", "--config", "Release", f"-j{max_jobs}"],
                               cwd=build_temp)
 
 
