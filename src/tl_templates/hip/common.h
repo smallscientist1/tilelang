@@ -111,3 +111,14 @@ template <typename T1, typename T2>
 TL_DEVICE void AtomicAdd(T1 *address, T2 val) {
   atomicAdd(reinterpret_cast<T1 *>(address), static_cast<T1>(val));
 }
+
+// fast tanh
+template<typename InDatatype, typename OutDatatype>
+TL_DEVICE void fasttanh(InDatatype* a, OutDatatype* b) {
+    float val = static_cast<float>(*a);
+    
+    // TODO: use fasttanh
+    float res = tanhf(val); 
+    
+    *b = static_cast<OutDatatype>(res);
+}
